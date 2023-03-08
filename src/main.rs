@@ -1,4 +1,4 @@
-use std::{convert::Infallible, error::Error, sync::Arc};
+use std::{error::Error, sync::Arc};
 
 use axum::{
     debug_handler,
@@ -8,7 +8,7 @@ use axum::{
         Sse,
     },
     routing::get,
-    Router, Server,
+    BoxError, Router, Server,
 };
 use futures::Stream;
 use sysinfo::{CpuExt, System, SystemExt};
@@ -56,13 +56,8 @@ struct AppState {
 #[debug_handler]
 async fn cpus_get(
     State(AppState { tx }): State<AppState>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> Sse<impl Stream<Item = Result<Event, impl Into<BoxError>>>> {
     let receiver = tx.subscribe();
-
-    let stream = WatchStream::new(receiver).map(|snapshot| {
-        let data = serde_json::to_string(&snapshot).unwrap();
-        Ok(Event::default().data(data))
-    });
-
+    let stream = WatchStream::new(receiver).map(|snapshot| Event::default().json_data(snapshot));
     Sse::new(stream).keep_alive(KeepAlive::default())
 }

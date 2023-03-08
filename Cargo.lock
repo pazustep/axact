@@ -25,7 +25,6 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "futures",
- "serde_json",
  "sysinfo",
  "tokio",
  "tokio-stream",
