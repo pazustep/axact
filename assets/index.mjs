@@ -1,12 +1,13 @@
-import { h, Component, render } from "https://unpkg.com/preact?module";
-import htm from "https://unpkg.com/htm?module";
+import { h, render } from "https://esm.sh/preact";
+import { signal } from "https://esm.sh/@preact/signals";
+import htm from "https://esm.sh/htm";
 
 const html = htm.bind(h);
 
-function App({ cpus }) {
+function CpuList({ cpus }) {
   return html`
     <div>
-      ${cpus.map(cpu => html`
+      ${cpus.value.map(cpu => html`
       <${Cpu} usage=${cpu} />`)}
     </div>`;
 }
@@ -20,9 +21,11 @@ function Cpu({ usage }) {
     `;
 }
 
+const cpus = signal([]);
 const source = new EventSource("/api/cpus");
 
 source.onmessage = ({ data }) => {
-  let cpus = JSON.parse(data);
-  render(html`<${App} cpus=${cpus} />`, document.body);
+  cpus.value = JSON.parse(data);
 };
+
+render(html`<${CpuList} cpus=${cpus}/>`, document.body);
