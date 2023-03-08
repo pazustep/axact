@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{convert::Infallible, error::Error, sync::Arc};
 
 use axum::{
     debug_handler,
@@ -9,19 +9,17 @@ use axum::{
         Html, IntoResponse, Response, Sse,
     },
     routing::get,
-    BoxError, Router, Server,
+    Router, Server,
 };
-use futures::{Stream, TryStreamExt};
+use futures::Stream;
 use sysinfo::{CpuExt, System, SystemExt};
-use tokio_stream::wrappers::BroadcastStream;
+use tokio::sync::watch::{self, Sender};
+use tokio_stream::{wrappers::WatchStream, StreamExt};
 
 #[tokio::main]
 async fn main() -> Result<(), impl Error> {
-    let (sender, _) = tokio::sync::broadcast::channel::<Snapshot>(1);
-
-    let state = AppState {
-        sender: sender.clone(),
-    };
+    let tx = Arc::new(watch::channel(vec![]).0);
+    let state = AppState { tx: tx.clone() };
 
     let router = Router::new()
         .route("/", get(root_get))
@@ -41,7 +39,7 @@ async fn main() -> Result<(), impl Error> {
         loop {
             sys.refresh_cpu();
             let v: Vec<_> = sys.cpus().iter().map(|cpu| cpu.cpu_usage()).collect();
-            let _ = sender.send(v);
+            tx.send_replace(v);
             std::thread::sleep(System::MINIMUM_CPU_UPDATE_INTERVAL);
         }
     });
@@ -53,7 +51,8 @@ type Snapshot = Vec<f32>;
 
 #[derive(Clone)]
 struct AppState {
-    sender: tokio::sync::broadcast::Sender<Snapshot>,
+    // Sender is thread-safe, no need to wrap in Mutex/RwLock
+    tx: Arc<Sender<Snapshot>>,
 }
 
 #[debug_handler]
@@ -82,13 +81,13 @@ async fn index_css_get() -> impl IntoResponse {
 
 #[debug_handler]
 async fn cpus_get(
-    State(AppState { sender }): State<AppState>,
-) -> Sse<impl Stream<Item = Result<Event, impl Into<BoxError>>>> {
-    let receiver = sender.subscribe();
+    State(AppState { tx }): State<AppState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let receiver = tx.subscribe();
 
-    let stream = BroadcastStream::new(receiver).map_ok(|snapshot| {
+    let stream = WatchStream::new(receiver).map(|snapshot| {
         let data = serde_json::to_string(&snapshot).unwrap();
-        Event::default().data(data)
+        Ok(Event::default().data(data))
     });
 
     Sse::new(stream).keep_alive(KeepAlive::default())
